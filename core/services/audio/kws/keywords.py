@@ -29,14 +29,9 @@ def should_generate_keywords():
     # 兼容 OPENCLAW_ENABLE (新) 和 OPENCLAW_ENABLED (旧)
     openclaw_env = os.environ.get("OPENCLAW_ENABLE") or os.environ.get("OPENCLAW_ENABLED") or ""
     openclaw_enabled = openclaw_env.lower() in ("1", "true", "yes")
-    openai_enabled = os.environ.get("OPENAI_ENABLE", "").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
 
-    if not xiaozhi_enabled and not openclaw_enabled and not openai_enabled:
-        return False, "XIAOZHI_ENABLE, OPENCLAW_ENABLE/OPENCLAW_ENABLED and OPENAI_ENABLE are all disabled"
+    if not xiaozhi_enabled and not openclaw_enabled:
+        return False, "XIAOZHI_ENABLE and OPENCLAW_ENABLE/OPENCLAW_ENABLED are both disabled"
 
     return True, ""
 
@@ -81,12 +76,18 @@ def main():
         bpe_model=args["bpe_model"],
     )
     with open(args["output"], "w", encoding="utf8") as f:
-        for _, txt in enumerate(encoded_texts):
+        for idx, txt in enumerate(encoded_texts):
             line = "".join(txt)
+            original = args["keywords"][idx] if idx < len(args["keywords"]) else line
+            # "瓦力同学" is shorter/less distinctive for the KWS model than
+            # "你好瓦力". Give it a per-keyword boost and lower trigger
+            # threshold; sherpa-onnx keeps :score/#threshold tokens in the
+            # generated keyword file.
+            extra = " :4.0 #0.10" if original == "瓦力同学" else ""
             if re.match(r"^[▁A-Z\s]+$", line):
-                f.write(" ".join(txt) + "\n")
+                f.write(" ".join(txt) + extra + "\n")
             else:
-                f.write(" ".join(txt) + f" @{line}" + "\n")
+                f.write(" ".join(txt) + extra + f" @{line}" + "\n")
     logger.debug(f"Keyword file generated: {args['output']}", module="KWS")
     return 0
 

@@ -26,6 +26,8 @@ class APIServer:
         self.port = port
         self.config = ConfigManager.instance()
         self.app = web.Application()
+        self.tts_files_dir = self.config.get_app_config("tts.doubao.cache_dir", "/app/openclaw/tts-cache")
+        os.makedirs(self.tts_files_dir, exist_ok=True)
         self.runner = None
         self.site = None
         self._setup_routes()
@@ -41,6 +43,7 @@ class APIServer:
         self.app.router.add_get("/api/health", self.handle_health)
         # TTS endpoints
         self.app.router.add_post("/api/tts/doubao", self.handle_tts_doubao)
+        self.app.router.add_get("/api/tts/files/{filename}", self.handle_tts_file)
         self.app.router.add_get("/api/tts/doubao_voices", self.handle_tts_voices)
 
     def _create_background_task(
@@ -386,6 +389,16 @@ class APIServer:
                 "speaker_ready": get_speaker() is not None
             }
         })
+
+    async def handle_tts_file(self, request: web.Request) -> web.StreamResponse:
+        """Serve synthesized TTS files to the XiaoAI device for URL playback."""
+        filename = os.path.basename(request.match_info.get("filename", ""))
+        if not filename:
+            raise web.HTTPNotFound()
+        path = os.path.join(self.tts_files_dir, filename)
+        if not os.path.isfile(path):
+            raise web.HTTPNotFound()
+        return web.FileResponse(path)
 
     async def handle_tts_doubao(self, request: web.Request) -> web.Response:
         """

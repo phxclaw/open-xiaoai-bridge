@@ -1,4 +1,5 @@
 import asyncio
+import os
 import socket
 import subprocess
 import sys
@@ -6,6 +7,19 @@ import time
 import uuid
 
 import requests
+
+
+# 远程 OpenClaw（通过宿主机 SSH 隧道 127.0.0.1:18790 -> remote 127.0.0.1:18789）
+REMOTE_MOVIE_OPENCLAW_URL = "ws://host.docker.internal:18790"
+REMOTE_MOVIE_OPENCLAW_TOKEN = os.getenv("REMOTE_MOVIE_OPENCLAW_TOKEN", "")
+REMOTE_MOVIE_OPENCLAW_SESSION_KEY = "agent:movie:open-xiaoai-bridge"
+
+
+async def play_openclaw_prompt(text: str):
+    """Play short wakeup prompt through the stable Doubao MP3 URL path."""
+    from core.openclaw import OpenClawManager
+
+    await OpenClawManager._play_response_with_tts(text, cache_short_prompt=True)
 
 
 # 每次唤醒生成独立 Session，对话互不干扰
@@ -26,11 +40,10 @@ async def before_wakeup(speaker, text, source, app):
         source  : 唤醒来源
                     'kws'    — 本地关键词唤醒（用户说了唤醒词）
                     'xiaoai' — 小爱同学收到用户语音指令
-        app     : MainApp 实例，可调用 send_to_openclaw / send_to_openai 等方法
+        app     : MainApp 实例，可调用 send_to_openclaw 等方法
 
     返回值：
         "openclaw" — 进入 OpenClaw 连续对话流程
-        "openai"   — 进入 OpenAI 兼容服务连续对话流程（例如 Hermes Agent API Server）
         "xiaozhi"  — 进入小智 AI 流程
         None       — 不做额外处理（可在此自行调用 app.send_to_openclaw 等）
 
@@ -51,13 +64,13 @@ async def before_wakeup(speaker, text, source, app):
         # for keyword, session_key in AGENT_SESSIONS.items():
         #     if keyword in text:
         #         app.set_openclaw_session_key(session_key)
-        #         await speaker.play(text=f"{keyword}来了")
+        #         await speaker.play(text=f"{keyword}来了", blocking=False)
         #         return "openclaw"
 
         # --- 示例二：每次唤醒生成独立 Session ---
         # if "龙虾" in text:
         #     app.set_openclaw_session_key(new_session_key())
-        #     await speaker.play(text="龙虾来了")
+        #     await speaker.play(text="龙虾来了", blocking=True)
         #     return "openclaw"
 
         # --- 示例三：进入 OpenClaw 前播放服务端本地开场白 ---
@@ -66,13 +79,22 @@ async def before_wakeup(speaker, text, source, app):
         #     return "openclaw"
 
         # Route to OpenClaw Agent by wake word
-        if "龙虾" in text:
-            await speaker.play(text="龙虾来了")
+        if "瓦力" in text:
+            app.set_openclaw_target(
+                url=REMOTE_MOVIE_OPENCLAW_URL,
+                token=REMOTE_MOVIE_OPENCLAW_TOKEN,
+                session_key=REMOTE_MOVIE_OPENCLAW_SESSION_KEY,
+            )
+            await play_openclaw_prompt("瓦力来了")
+            await asyncio.sleep(1.0)
             return "openclaw"
 
-        if "小黑" in text:
-            await speaker.play(text="小黑来了")
-            return "openai"
+        if "龙虾" in text:
+            # Reset to the default/local OpenClaw target for Lobster.
+            app.set_openclaw_target()
+            await play_openclaw_prompt("龙虾来了")
+            await asyncio.sleep(1.0)
+            return "openclaw"
 
         if "小智" in text:
             await speaker.play(text="小智来了")
@@ -87,13 +109,19 @@ async def before_wakeup(speaker, text, source, app):
         #     await speaker.abort_xiaoai()
         #     return "openclaw"
 
+        if text == "召唤瓦力":
+            app.set_openclaw_target(
+                url=REMOTE_MOVIE_OPENCLAW_URL,
+                token=REMOTE_MOVIE_OPENCLAW_TOKEN,
+                session_key=REMOTE_MOVIE_OPENCLAW_SESSION_KEY,
+            )
+            await speaker.abort_xiaoai()
+            return "openclaw"  # Remote OpenClaw movie agent continuous conversation
+
         if text == "召唤龙虾":
+            app.set_openclaw_target()
             await speaker.abort_xiaoai()
             return "openclaw"  # OpenClaw continuous conversation
-
-        if text == "召唤小黑":
-            await speaker.abort_xiaoai()
-            return "openai"  # OpenAI-compatible service continuous conversation
 
         if text == "召唤小智":
             await speaker.abort_xiaoai()
@@ -111,11 +139,6 @@ async def before_wakeup(speaker, text, source, app):
             await app.send_to_openclaw(text.replace("告诉龙虾", ""))
             return None
 
-        if "让小黑" in text:
-            await speaker.abort_xiaoai()
-            await app.send_to_openai_and_play_reply(text.replace("让小黑", ""))
-            return None
-
 
 async def after_wakeup(speaker, source=None, session_key=None):
     """
@@ -124,8 +147,7 @@ async def after_wakeup(speaker, source=None, session_key=None):
     - source: 退出来源
         - 'xiaozhi': 小智对话超时退出
         - 'openclaw': OpenClaw 连续对话退出
-        - 'openai': OpenAI 兼容服务连续对话退出
-    - session_key: 当前 OpenClaw/OpenAI 后端 session_key
+    - session_key: 当前 OpenClaw session_key（仅 source='openclaw' 时传入）
         可据此区分是哪个 Agent 退出，例如播放不同的退出提示语
     """
     if source == "openclaw":
@@ -141,11 +163,9 @@ async def after_wakeup(speaker, source=None, session_key=None):
         #     await speaker.play(text="小美，再见")
         # else:
         #     await speaker.play(text="再见")
-        await speaker.play(text="龙虾，再见")
-    if source == "openai":
-        await speaker.play(text="小黑，再见")
+        await speaker.play(text="龙虾，再见", blocking=False)
     if source == "xiaozhi":
-        await speaker.play(text="小智，再见")
+        await speaker.play(text="小智，再见", blocking=False)
 
 APP_CONFIG = {
     "wakeup": {
@@ -156,8 +176,9 @@ APP_CONFIG = {
             "hi open claw",
             "你好龙虾",
             "龙虾你好",
-            "你好小黑",
-            "小黑你好",
+            "你好瓦力",
+            "瓦力你好",
+            "瓦力同学",
         ],
         # 静音多久后自动退出唤醒（秒）
         "timeout": 20,
@@ -217,7 +238,7 @@ APP_CONFIG = {
         "OTA_URL": "http://127.0.0.1:8003/xiaozhi/ota/",
         "WEBSOCKET_URL": "ws://127.0.0.1:8000/xiaozhi/v1/",
         "WEBSOCKET_ACCESS_TOKEN": "", #（可选）一般用不到这个值
-        "DEVICE_ID": "", #（可选）默认自动生成
+        "DEVICE_ID": "3a:fc:13:48:bb:ba", #（可选）默认自动生成
         "VERIFICATION_CODE": "", # 首次登陆时，验证码会在这里更新
     },
     "xiaoai": {
@@ -233,17 +254,20 @@ APP_CONFIG = {
             # 豆包语音合成 API 配置
             # 文档地址: https://www.volcengine.com/docs/6561/1598757?lang=zh
             # 产品地址: https://www.volcengine.com/docs/6561/1871062
-            "app_id": "xxxx",         # 你的 App ID
-            "access_key": "xxxxxx",       # 你的 Access Key
-            "default_speaker": "zh_female_vv_uranus_bigtts",  # 音色 https://www.volcengine.com/docs/6561/1257544?lang=zh
-            "audio_format": "pcm",  # 推荐默认值：局域网稳定环境下首音更快、播放更顺
-            "stream": True,  # 推荐默认值：边合成边播放，首音延迟更低
+            "app_id": os.getenv("DOUBAO_TTS_APP_ID", ""),         # 你的 App ID
+            "access_key": os.getenv("DOUBAO_TTS_ACCESS_KEY", ""),       # 你的 Access Key
+            "default_speaker": "zh_female_xiaohe_uranus_bigtts",  # 音色 https://www.volcengine.com/docs/6561/1257544?lang=zh
+            "audio_format": "mp3",  # 推荐默认值：局域网稳定环境下首音更快、播放更顺
+            "stream": False,  # 推荐默认值：边合成边播放，首音延迟更低
+            "playback_mode": "url",  # 用设备原生 URL 播放 MP3，避免 PCM 推流 underrun 卡顿
+            "playback_base_url": "http://192.168.3.27:9092/api/tts/files",
+            "cache_dir": "/app/openclaw/tts-cache",
         }
     },
     # OpenClaw Configuration
     "openclaw": {
-        "url": "ws://127.0.0.1:18789",  # OpenClaw WebSocket 地址
-        "token": "your_openclaw_token",  # OpenClaw 认证令牌
+        "url": "ws://host.docker.internal:18789",  # OpenClaw WebSocket 地址
+        "token": "6369fd63aeb7e3459aec5a0f31c1d35e170ecb4bca5cf5c6",  # OpenClaw 认证令牌
         # 输入模式：
         #   - "local_asr": 现有链路，使用本地 VAD + SherpaASR
         #   - "xiaoai_asr": 实验链路，唤醒小爱后接管原生 ASR 结果给 OpenClaw
@@ -256,7 +280,7 @@ APP_CONFIG = {
         "session_key": "agent:main:open-xiaoai-bridge",
         "identity_path": "/app/openclaw/identity/device.json",  # 设备身份文件路径；容器部署时建议挂载持久化目录
         "tts_speed": 1.0,  # TTS 语速 (0.5-2.0)，仅豆包 TTS 生效，小爱原生 TTS 不支持调速
-        "tts_speaker": "xiaoai",  # "xiaoai" = 小爱原生 TTS；填豆包音色 ID 则用豆包 TTS；不设置则使用 tts.doubao.default_speaker
+        "tts_speaker": "zh_female_xiaohe_uranus_bigtts",  # "xiaoai" = 小爱原生 TTS；填豆包音色 ID 则用豆包 TTS；不设置则使用 tts.doubao.default_speaker
         # 可按 agentId 单独覆盖音色，优先级高于 tts_speaker
         # agentId 来自 session_key，格式为：agent:<agentId>:<rest>
         # 示例：
@@ -271,34 +295,10 @@ APP_CONFIG = {
         # rule_prompt: 用于「自动播放」和「连续对话」场景
         #   - send_to_openclaw_and_play_reply() 会自动追加
         #   - OpenClawConversationController 会自动追加
-        "rule_prompt": "注意：将结果处理成纯文字版，不要返回任何 markdown 格式，也不要包含任何代码块，并将字数控制在300字以内",
+        "rule_prompt": "注意：必须用简体中文回答；将结果处理成纯文字版，不要返回任何 markdown 格式，也不要包含任何代码块，并将字数控制在300字以内",
         # rule_prompt_for_skill: 用于「Agent 自主播报」场景（方式三）
         #   - send_to_openclaw() 会自动追加
         #   - 告诉 Agent 需要调用 xiaoai-tts skill 来播报，因为服务端不会自动播放
-        "rule_prompt_for_skill": "注意：这条消息是主人通过小爱音箱发送的，他看不到你回复的文字，调用 `xiaoai-tts` skill 播报出来。字数控制在300字以内"
-    },
-    # OpenAI-compatible Service Configuration
-    # 可接入 Hermes Agent API Server、OpenAI、Ollama、LM Studio 等兼容 /v1/chat/completions 的服务
-    "openai": {
-        "base_url": "http://127.0.0.1:8000/v1",
-        "api_key": "",
-        "model": "gpt-4o-mini",
-        # 输入模式：
-        #   - "local_asr": 使用本地 VAD + SherpaASR
-        #   - "xiaoai_asr": 接管小爱原生 ASR 结果
-        "input_mode": "local_asr",
-        "session_key": "default",
-        "system_prompt": "",
-        "temperature": 0.7,
-        "max_tokens": 512,
-        "history_max_messages": 20,
-        "response_timeout": 120,
-        "tts_speed": 1.0,
-        "tts_speaker": "xiaoai",
-        "session_tts_speakers": {},
-        "exit_keywords": ["退出", "停止", "再见"],
-        "rule_prompt": "注意：将结果处理成纯文字版，不要返回任何 markdown 格式，也不要包含任何代码块，并将字数控制在300字以内",
-        "rule_prompt_for_skill": "注意：这条消息是主人通过小爱音箱发送的，他看不到你回复的文字。字数控制在300字以内",
-        "extra_body": {},
+        "rule_prompt_for_skill": "注意：必须用简体中文回答；这条消息是主人通过小爱音箱发送的，他看不到你回复的文字，调用 `xiaoai-tts` skill 播报出来。字数控制在300字以内"
     },
 }

@@ -2,7 +2,11 @@
 Doubao (ByteDance Volcano Engine) TTS Service
 """
 
+import base64
 import json
+import uuid
+
+import aiohttp
 
 from core.utils.config import ConfigManager
 
@@ -563,6 +567,79 @@ class DoubaoTTS:
         if len(text or "") <= int(self.auto_pcm_max_chars):
             return "pcm"
         return "mp3"
+
+    async def synthesize_audio(
+        self,
+        text: str,
+        format: str = "mp3",
+        sample_rate: int = 24000,
+        speed: float = 1.0,
+        context_texts: list | None = None,
+        emotion: str | None = None,
+    ) -> bytes:
+        """Synthesize text and return encoded audio bytes without playing it."""
+        reqid = str(uuid.uuid4())
+        payload = self._build_payload(
+            text=text,
+            format=format,
+            sample_rate=sample_rate,
+            speed=speed,
+            context_texts=context_texts,
+            emotion=emotion,
+        )
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer;{self.access_key}",
+            "X-Api-App-Id": self.app_id,
+            "X-Api-App-Key": self.app_id,
+            "X-Api-Access-Key": self.access_key,
+            "X-Api-Resource-Id": self.resource_id,
+            "X-Api-Request-Id": reqid,
+        }
+
+        timeout = aiohttp.ClientTimeout(total=120, connect=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(self.api_url, json=payload, headers=headers) as resp:
+                body = await resp.text()
+                if resp.status >= 400:
+                    raise RuntimeError(f"Doubao TTS HTTP {resp.status}: {body[:500]}")
+
+        chunks: list[bytes] = []
+        last_code = None
+        last_message = ""
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith(("event:", "id:", "retry:")):
+                continue
+            if line.startswith("data:"):
+                line = line[5:].strip()
+            if line == "[DONE]":
+                continue
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+
+            code = item.get("code")
+            message = item.get("message") or item.get("msg") or ""
+            if isinstance(code, int):
+                last_code = code
+            if message:
+                last_message = message
+            if isinstance(code, int) and code not in {0, 20000000}:
+                raise RuntimeError(
+                    f"Doubao TTS error code={code}, message={message or 'Unknown API error'}, reqid={reqid}"
+                )
+            encoded_audio = item.get("data")
+            if encoded_audio:
+                chunks.append(base64.b64decode(encoded_audio))
+
+        audio = b"".join(chunks)
+        if not audio:
+            code_hint = f", last_code={last_code}" if last_code is not None else ""
+            msg_hint = f", last_message={last_message}" if last_message else ""
+            raise RuntimeError(f"Doubao TTS response missing audio data{code_hint}{msg_hint}")
+        return audio
 
     @classmethod
     def list_voices(cls) -> dict:

@@ -210,6 +210,52 @@ class OpenClawManager:
         cls._session_key = session_key
 
     @classmethod
+    def set_target(
+        cls,
+        url: str | None = None,
+        token: str | None = None,
+        session_key: str | None = None,
+    ):
+        """Override OpenClaw target at runtime for wake-word based routing.
+
+        url/token changes are connection-scoped, so an existing WebSocket is
+        closed and the next send reconnects to the new Gateway. session_key is
+        still per agent request.
+        """
+        if not cls._initialized:
+            cls.initialize_from_config()
+
+        previous_url = cls._url
+        previous_token = cls._token
+
+        if url is not None:
+            cls._url = url
+        if token is not None:
+            cls._token = token
+        if session_key is not None:
+            logger.info(f"[OpenClaw] Session key updated: {cls._session_key!r} → {session_key!r}")
+            cls._session_key = session_key
+
+        target_changed = previous_url != cls._url or previous_token != cls._token
+        if target_changed:
+            logger.info(f"[OpenClaw] Target updated: {previous_url!r} → {cls._url!r}")
+            old_ws = cls._websocket
+            cls._websocket = None
+            cls._connected = False
+            cls._should_reconnect = True
+            for task_attr in ("_heartbeat_task", "_receiver_task", "_reconnect_task"):
+                task = getattr(cls, task_attr, None)
+                if task and not task.done():
+                    task.cancel()
+                setattr(cls, task_attr, None)
+            if old_ws is not None:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(old_ws.close())
+                except RuntimeError:
+                    pass
+
+    @classmethod
     def get_tts_speaker_for_session_key(cls, session_key: str | None = None) -> str | None:
         """Resolve TTS speaker for the agentId in a session key."""
         if not cls._initialized:
@@ -942,6 +988,7 @@ class OpenClawManager:
         text: str,
         tts_speaker: str | None = None,
         playback_token: int | None = None,
+        cache_short_prompt: bool = False,
     ):
         """Synthesize text using Doubao TTS and play through speaker."""
         try:
@@ -957,7 +1004,7 @@ class OpenClawManager:
                 )
                 speaker = get_speaker()
                 if speaker:
-                    await speaker.play(text=text, blocking=True)
+                    await speaker.play(text=text, blocking=False)
                 return
 
             from core.services.tts.doubao import DoubaoTTS
@@ -971,7 +1018,7 @@ class OpenClawManager:
                 logger.warning("[OpenClaw] Doubao TTS credentials not configured, falling back to xiaoai native tts")
                 speaker = get_speaker()
                 if speaker:
-                    await speaker.play(text=text, blocking=True)
+                    await speaker.play(text=text, blocking=False)
                 return
 
             speaker_id = resolved_tts_speaker or tts_config.get(
@@ -993,6 +1040,74 @@ class OpenClawManager:
             speaker = get_speaker()
             if not speaker:
                 logger.error("[OpenClaw] Speaker not available")
+                return
+
+            playback_mode = tts_config.get("playback_mode", "pcm")
+            if playback_mode == "url":
+                import hashlib
+                import os
+                import uuid
+
+                files_dir = tts_config.get("cache_dir", "/app/openclaw/tts-cache")
+                os.makedirs(files_dir, exist_ok=True)
+
+                if cache_short_prompt:
+                    agent_id = "default"
+                    if cls._session_key:
+                        parts = cls._session_key.split(":")
+                        if len(parts) >= 2 and parts[1]:
+                            agent_id = parts[1]
+                    cache_material = "|".join(
+                        [
+                            agent_id,
+                            speaker_id,
+                            str(cls._tts_speed),
+                            "mp3",
+                            text,
+                        ]
+                    )
+                    digest = hashlib.sha256(cache_material.encode("utf-8")).hexdigest()[:32]
+                    filename = f"prompt_{agent_id}_{digest}.mp3"
+                    file_path = os.path.join(files_dir, filename)
+                else:
+                    filename = f"openclaw_{uuid.uuid4().hex}.mp3"
+                    file_path = os.path.join(files_dir, filename)
+
+                if cache_short_prompt and os.path.isfile(file_path) and os.path.getsize(file_path) > 0:
+                    logger.info(
+                        f"[OpenClaw] TTS cache hit: agent={agent_id}, "
+                        f"speaker={speaker_id}, text={text[:20]!r}"
+                    )
+                else:
+                    if cache_short_prompt:
+                        logger.info(
+                            f"[OpenClaw] TTS cache miss: agent={agent_id}, "
+                            f"speaker={speaker_id}, text={text[:20]!r}"
+                        )
+                    audio_bytes = await tts.synthesize_audio(
+                        text,
+                        format="mp3",
+                        sample_rate=24000,
+                        speed=cls._tts_speed,
+                    )
+                    with open(file_path, "wb") as f:
+                        f.write(audio_bytes)
+
+                base_url = tts_config.get(
+                    "playback_base_url",
+                    "http://192.168.3.27:9092/api/tts/files",
+                ).rstrip("/")
+                url = f"{base_url}/{filename}"
+                logger.info(f"[OpenClaw] Playing Doubao TTS via device URL: {url}")
+                if cache_short_prompt:
+                    # miplayer URL playback can block forever on short cached prompts.
+                    # Use the device native non-blocking URL player, then wait long
+                    # enough for the short prompt to finish before returning.
+                    await speaker.play(url=url, blocking=False)
+                    await asyncio.sleep(1.5)
+                else:
+                    await speaker.play(url=url, blocking=True)
+                logger.debug("[OpenClaw] URL playback completed")
                 return
 
             if use_stream:
@@ -1034,7 +1149,7 @@ class OpenClawManager:
                 from core.ref import get_speaker
                 speaker = get_speaker()
                 if speaker:
-                    await speaker.play(text=text, blocking=True)
+                    await speaker.play(text=text, blocking=False)
             except Exception as fallback_error:
                 logger.error(f"[OpenClaw] Fallback TTS also failed: {fallback_error}")
 
