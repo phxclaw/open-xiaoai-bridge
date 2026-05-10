@@ -14,9 +14,28 @@
 
 [📖 快速开始](#-快速开始) · [🔌 OpenAI 兼容服务](#-openai-兼容服务) · [🦞 OpenClaw 集成](#-openclaw-集成) · [🔧 API 文档](#-api-server) · [🐛 常见问题](#-常见问题)
 
-> 本项目受 [Open-XiaoAI](https://github.com/idootop/open-xiaoai) 启发，并参考其 `examples/xiaozhi/` 示例演进而来，现已作为独立项目持续维护。
+> 本项目基于 [coderzc/open-xiaoai-bridge](https://github.com/coderzc/open-xiaoai-bridge) 持续演进，是面向 OpenClaw 多 Agent 语音入口场景的增强版。
+>
+> 相比原版，本分支重点强化了：OpenClaw / OpenAI 兼容服务接入、多唤醒词多 Agent 路由、连续对话、小爱原生 ASR 接管、豆包 TTS 播放链路、远程 Agent 隧道路由与运行稳定性。
 
 </div>
+
+***
+
+## 🚀 增强版特性
+
+这是基于原版 `open-xiaoai-bridge` 的升级版本，目标是把小爱音箱变成稳定的 OpenClaw 语音入口，而不仅是单一 AI 服务桥接器。主要新增/强化能力：
+
+- **OpenClaw 深度集成**：通过 WebSocket 接入 OpenClaw Gateway，支持 `send`、等待回复、TTS 播放和连续对话。
+- **OpenAI 兼容服务支持**：可接入 Hermes Agent API Server、OpenAI、Ollama、LM Studio 等 `/v1/chat/completions` 服务。
+- **多唤醒词多 Agent 路由**：例如“你好龙虾”路由到本地 OpenClaw，“你好瓦力/瓦力同学”路由到远程 movie Agent；同一台音箱可按唤醒词动态切换目标。
+- **动态 OpenClaw Target 切换**：运行时切换 `url / token / session_key`，支持本地 Agent 与远程 SSH tunnel Agent 无缝切换。
+- **小爱原生 ASR 接管**：OpenClaw 连续对话可使用小爱原生 ASR，降低本地 ASR 依赖，并保留自然的小爱唤醒体验。
+- **本地 KWS + VAD 连续对话**：支持自定义关键词、唤醒后多轮连续对话、超时退出和打断恢复。
+- **豆包 TTS 增强**：支持豆包音色、MP3 URL 播放、短提示音缓存、长回复流式/分段播放、慢响应等待提示。
+- **远程播放与文件服务**：HTTP API 支持 TTS 文件访问，便于小爱设备通过 URL 拉取并播放缓存 MP3。
+- **监听仲裁与恢复**：在小爱原生会话、OpenClaw 会话、本地 KWS/VAD 之间做状态切换，避免互相抢麦或监听卡死。
+- **运行稳定性改进**：包含 OpenClaw 自动重连、心跳检测、配置热重载、音频输入开关、容器部署路径修正等。
 
 ***
 
