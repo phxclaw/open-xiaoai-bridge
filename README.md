@@ -2,9 +2,9 @@
 
 # Open-XiaoAI Bridge
 
-[![Python](https://img.shields.io/badge/Python-3.12+-3776ab?logo=python&logoColor=white)](https://www.python.org/) [![Rust](https://img.shields.io/badge/Rust-native_module-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/) [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE) [![GitHub Stars](https://img.shields.io/github/stars/coderzc/open-xiaoai-bridge?style=flat&logo=github)](https://github.com/coderzc/open-xiaoai-bridge/stargazers) [![Docker Image](https://img.shields.io/badge/ghcr.io-open--xiaoai--bridge-2496ed?logo=docker&logoColor=white)](https://ghcr.io/coderzc/open-xiaoai-bridge)
+[![Python](https://img.shields.io/badge/Python-3.12+-3776ab?logo=python&logoColor=white)](https://www.python.org/) [![Rust](https://img.shields.io/badge/Rust-native_module-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/) [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE) [![GitHub Stars](https://img.shields.io/github/stars/phxclaw/open-xiaoai-bridge?style=flat&logo=github)](https://github.com/phxclaw/open-xiaoai-bridge/stargazers) [![Docker Image](https://img.shields.io/badge/ghcr.io-open--xiaoai--bridge-2496ed?logo=docker&logoColor=white)](https://ghcr.io/phxclaw/open-xiaoai-bridge)
 
-[![New](https://img.shields.io/badge/🎉_新功能-OpenClaw_支持_自定义唤醒词_|_连续对话_|_多_Agent_路由_|_克隆音色_|_流式播放-f97316)](https://github.com/coderzc/open-xiaoai-bridge/releases)
+[![New](https://img.shields.io/badge/🎉_新功能-OpenClaw_支持_自定义唤醒词_|_连续对话_|_多_Agent_路由_|_克隆音色_|_流式播放-f97316)](https://github.com/phxclaw/open-xiaoai-bridge/releases)
 
 **小爱音箱与外部 AI 服务（小智 AI、OpenClaw、OpenAI 兼容服务）的桥接器**
 
@@ -14,7 +14,7 @@
 
 [📖 快速开始](#-快速开始) · [🔌 OpenAI 兼容服务](#-openai-兼容服务) · [🦞 OpenClaw 集成](#-openclaw-集成) · [🔧 API 文档](#-api-server) · [🐛 常见问题](#-常见问题)
 
-> 本项目基于 [coderzc/open-xiaoai-bridge](https://github.com/coderzc/open-xiaoai-bridge) 持续演进，是面向 OpenClaw 多 Agent 语音入口场景的增强版。
+> 本项目基于 [phxclaw/open-xiaoai-bridge](https://github.com/phxclaw/open-xiaoai-bridge) 持续演进，是面向 OpenClaw 多 Agent 语音入口场景的增强版。
 >
 > 相比原版，本分支重点强化了：OpenClaw / OpenAI 兼容服务接入、多唤醒词多 Agent 路由、连续对话、小爱原生 ASR 接管、豆包 TTS 播放链路、远程 Agent 隧道路由与运行稳定性。
 
@@ -62,9 +62,9 @@
 ### 📦 前置步骤
 
 1. **🔧 刷机** — 更新小爱音箱固件，开启 SSH
-   - [刷机教程](https://github.com/idootop/open-xiaoai/blob/main/docs/flash.md)
+   - [刷机教程](https://github.com/phxclaw/open-xiaoai/blob/main/docs/flash.md)
 2. **🛠️ 音箱补丁程序安装 Client** — 在音箱上运行 Rust Client 端
-   - [补丁程序安装教程](https://github.com/coderzc/open-xiaoai/blob/main/packages/client-rust/README.md)
+   - [补丁程序安装教程](https://github.com/phxclaw/open-xiaoai/blob/main/packages/client-rust/README.md)
 
 ### 📥 模型文件
 
@@ -72,7 +72,7 @@
 
 如果 OpenClaw / OpenAI 兼容服务连续对话使用 `xiaoai_asr`，只需要 `VAD + KWS`，不需要本地 ASR 模型。
 
-1. 从 [releases](https://github.com/coderzc/open-xiaoai-bridge/releases/tag/vad-kws-asr-models) 下载模型压缩包
+1. 从 [releases](https://github.com/phxclaw/open-xiaoai-bridge/releases/tag/vad-kws-asr-models) 下载模型压缩包
 2. 解压模型文件（路径见下方具体部署方式）
 
 ### 🐳 Docker Compose（推荐）
@@ -81,8 +81,8 @@
 
 ```bash
 # 下载配置文件
-curl -O https://raw.githubusercontent.com/coderzc/open-xiaoai-bridge/main/config.py
-curl -O https://raw.githubusercontent.com/coderzc/open-xiaoai-bridge/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/phxclaw/open-xiaoai-bridge/main/config.py
+curl -O https://raw.githubusercontent.com/phxclaw/open-xiaoai-bridge/main/docker-compose.yml
 
 # 按需修改 config.py 和 docker-compose.yml，然后启动
 docker compose up -d
@@ -90,7 +90,7 @@ docker compose up -d
 
 > **💡 国内镜像加速**：如果拉取镜像太慢，可将 `docker-compose.yml` 中的镜像改为：
 > ```yaml
-> image: ghcr.nju.edu.cn/coderzc/open-xiaoai-bridge:latest
+> image: ghcr.nju.edu.cn/phxclaw/open-xiaoai-bridge:latest
 > ```
 
 > **💡 容器访问宿主机 OpenClaw**：如果需要让容器访问宿主机上的 OpenClaw，请查看 [Docker 常见问题](#-docker)。
@@ -107,7 +107,7 @@ volumes:
 模型文件解压到 `core/models/` 目录，然后克隆仓库并启动：
 
 ```bash
-git clone https://github.com/coderzc/open-xiaoai-bridge.git
+git clone https://github.com/phxclaw/open-xiaoai-bridge.git
 cd open-xiaoai-bridge
 
 # 依赖: uv, Rust
@@ -1014,7 +1014,7 @@ APP_CONFIG = {
 
 ## 致谢
 
-感谢 [Open-XiaoAI](https://github.com/idootop/open-xiaoai) 及其 `examples/xiaozhi/` 示例提供的启发与参考。
+感谢 [Open-XiaoAI](https://github.com/phxclaw/open-xiaoai) 及其 `examples/xiaozhi/` 示例提供的启发与参考。
 
 ***
 
@@ -1032,8 +1032,8 @@ APP_CONFIG = {
 
 | 资源              | 链接                                                                                                                                                                                                                                                       |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🔧 刷机教程         | [刷机教程](https://github.com/idootop/open-xiaoai/blob/main/docs/flash.md)                                                                                                                                                                                   |
-| 🛠️ Client 端安装  | [Client 端安装](https://github.com/idootop/open-xiaoai/blob/main/packages/client-rust/README.md)                                                                                                                                                            |
+| 🔧 刷机教程         | [刷机教程](https://github.com/phxclaw/open-xiaoai/blob/main/docs/flash.md)                                                                                                                                                                                   |
+| 🛠️ Client 端安装  | [Client 端安装](https://github.com/phxclaw/open-xiaoai/blob/main/packages/client-rust/README.md)                                                                                                                                                            |
 | 🎙️ 豆包 TTS 音色列表 | [火山引擎文档](https://www.volcengine.com/docs/6561/1257544)                                                                                                                                                                                                   |
 
 ***
