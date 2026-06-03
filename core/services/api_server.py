@@ -51,14 +51,16 @@ class APIServer:
         coro: Coroutine[Any, Any, Any],
         name: str,
     ) -> asyncio.Task:
-        """Create a background task and log any unhandled exception."""
+        """Create a background task and log completion or any unhandled exception."""
         task = asyncio.create_task(coro)
+        logger.info(f"[APIServer] Background task created ({name})")
 
         def _log_task_result(done_task: asyncio.Task):
             try:
-                done_task.result()
+                result = done_task.result()
+                logger.info(f"[APIServer] Background task completed ({name}): result={result}")
             except Exception as exc:
-                logger.error(f"[APIServer] Background task failed ({name}): {exc}")
+                logger.exception(f"[APIServer] Background task failed ({name}): {exc}")
 
         task.add_done_callback(_log_task_result)
         return task
@@ -163,11 +165,21 @@ class APIServer:
                     status=503
                 )
 
+            logger.info(
+                f"[APIServer] Play URL request received: url={url}, "
+                f"blocking={blocking}, timeout={timeout}"
+            )
+
             if blocking:
                 result = await speaker.play(url=url, blocking=True, timeout=timeout)
+                logger.info(f"[APIServer] Play URL blocking completed: url={url}, result={result}")
                 return web.json_response({"success": result})
             else:
-                asyncio.create_task(speaker.play(url=url, blocking=False, timeout=timeout))
+                self._create_background_task(
+                    speaker.play(url=url, blocking=False, timeout=timeout),
+                    name=f"play_url url={url} timeout={timeout}",
+                )
+                logger.info(f"[APIServer] Play URL background task scheduled: url={url}, timeout={timeout}")
                 return web.json_response({"success": True, "message": "Playing URL in background"})
 
         except json.JSONDecodeError:

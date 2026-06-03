@@ -16,6 +16,16 @@ class CommandResult:
         self.exit_code = exit_code
 
 
+def _safe_truncate(value, limit: int = 800) -> str:
+    """Return a log-safe, bounded representation of command output."""
+    if value is None:
+        return ""
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}...<truncated {len(text) - limit} chars>"
+
+
 class SpeakerManager:
     status: Literal["playing", "paused", "idle"] = "idle"
 
@@ -74,7 +84,15 @@ class SpeakerManager:
                 if url
                 else f"/usr/sbin/tts_play.sh '{text.replace("'", "'\\''") or '你好'}'"
             )
+            if url:
+                logger.info(f"[Speaker] Blocking URL playback via miplayer: timeout={timeout}, url={url}")
             res = await self.run_shell(command, timeout=timeout)
+            if url:
+                logger.info(
+                    "[Speaker] Blocking URL playback finished: "
+                    f"exit_code={res.exit_code}, stdout={_safe_truncate(res.stdout)}, "
+                    f"stderr={_safe_truncate(res.stderr)}"
+                )
             return res.exit_code == 0
 
         if url:
@@ -85,6 +103,12 @@ class SpeakerManager:
             command = f"ubus call mibrain text_to_speech '{data}'"
 
         res = await self.run_shell(command, timeout=timeout)
+        if url and res:
+            logger.info(
+                "[Speaker] Non-blocking URL playback command finished: "
+                f"exit_code={res.exit_code}, stdout={_safe_truncate(res.stdout)}, "
+                f"stderr={_safe_truncate(res.stderr)}"
+            )
         return '"code": 0' in res.stdout if res else False
 
     async def play_server_file(
@@ -234,5 +258,14 @@ class SpeakerManager:
                     data.get("stderr", ""),
                     data.get("exit_code", 0),
                 )
-        except Exception:
+            logger.error(
+                "[Speaker] run_shell returned undecodable response: "
+                f"script={_safe_truncate(script)}, timeout={timeout}, raw={_safe_truncate(res)}"
+            )
+        except Exception as exc:
+            logger.exception(
+                "[Speaker] run_shell failed: "
+                f"script={_safe_truncate(script)}, timeout={timeout}, raw={_safe_truncate(res)}, error={exc}"
+            )
             return CommandResult("error", res, -1)
+        return CommandResult("", res, -1)
