@@ -13,9 +13,23 @@ from typing import Any
 import open_xiaoai_server
 from aiohttp import web
 from core.ref import get_speaker, get_xiaoai
+from core.services.speaker import PlayResult
 from core.services.tts.doubao import DoubaoTTS
 from core.utils.config import ConfigManager
 from core.utils.logger import logger
+
+
+def _play_result_payload(result) -> dict:
+    """Build a JSON-serializable response payload for a speaker.play() result.
+
+    Structured PlayResult instances are expanded to their full dict (so
+    callers can see started/completed/exit_code/stdout/stderr/error).
+    Legacy boolean results (e.g. from non-shell playback paths) fall back
+    to the plain {"success": bool} shape.
+    """
+    if isinstance(result, PlayResult):
+        return result.to_dict()
+    return {"success": bool(result)}
 
 
 class APIServer:
@@ -114,7 +128,7 @@ class APIServer:
             # Run in background to not block the response
             if blocking:
                 result = await speaker.play(text=text, blocking=True, timeout=timeout)
-                return web.json_response({"success": result})
+                return web.json_response(_play_result_payload(result))
             else:
                 asyncio.create_task(speaker.play(text=text, blocking=False, timeout=timeout))
                 return web.json_response({"success": True, "message": "Playing text in background"})
@@ -165,7 +179,7 @@ class APIServer:
 
             if blocking:
                 result = await speaker.play(url=url, blocking=True, timeout=timeout)
-                return web.json_response({"success": result})
+                return web.json_response(_play_result_payload(result))
             else:
                 asyncio.create_task(speaker.play(url=url, blocking=False, timeout=timeout))
                 return web.json_response({"success": True, "message": "Playing URL in background"})

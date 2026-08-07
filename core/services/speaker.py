@@ -1,6 +1,7 @@
 import asyncio
 import os
-from typing import Literal
+from dataclasses import asdict, dataclass
+from typing import Literal, Optional
 
 import open_xiaoai_server
 
@@ -10,10 +11,52 @@ from core.utils.logger import logger
 
 
 class CommandResult:
-    def __init__(self, stdout: str, stderr: str, exit_code: int):
+    def __init__(self, stdout: str, stderr: str, exit_code: int, ok: bool = True):
         self.stdout = stdout
         self.stderr = stderr
         self.exit_code = exit_code
+        # ok=False means we never got a decodable exit_code from the device
+        # (transport/decoding failure), as opposed to the command itself
+        # running and reporting a non-zero exit_code.
+        self.ok = ok
+
+
+@dataclass(frozen=True)
+class PlayResult:
+    """Structured outcome of a blocking playback command.
+
+    `started` tracks whether the device actually ran the playback command
+    (and therefore audio may have already played), independent of whether
+    the command's own exit code reported success. It is `None` (unknown)
+    when the shell transport failed or returned an undecodable response:
+    the lack of a response cannot prove playback never started, since the
+    device may have run the command and played audio before the response
+    was lost. `success` stays True iff the command reported successful
+    completion, so existing truthy checks keep working.
+    """
+
+    success: bool
+    started: Optional[bool]
+    completed: bool
+    exit_code: Optional[int]
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    error: Optional[str] = None
+
+    def __bool__(self) -> bool:
+        return self.success
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def _safe_truncate(value, limit: int = 800) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}...<truncated {len(text) - limit} chars>"
 
 
 class SpeakerManager:
@@ -69,13 +112,14 @@ class SpeakerManager:
             return get_xiaoai().on_output_data(buffer)
 
         if blocking:
+            escaped_text = (text or "你好").replace("'", "'\\''")
             command = (
                 f"miplayer -f '{url}'"
                 if url
-                else f"/usr/sbin/tts_play.sh '{text.replace("'", "'\\''") or '你好'}'"
+                else f"/usr/sbin/tts_play.sh '{escaped_text}'"
             )
             res = await self.run_shell(command, timeout=timeout)
-            return res.exit_code == 0
+            return self._build_play_result(res)
 
         if url:
             data = json_encode({"url": url, "type": 1})
@@ -86,6 +130,39 @@ class SpeakerManager:
 
         res = await self.run_shell(command, timeout=timeout)
         return '"code": 0' in res.stdout if res else False
+
+    def _build_play_result(self, res: CommandResult) -> PlayResult:
+        """Build a structured PlayResult from a blocking shell CommandResult.
+
+        A device that responded at all (res.ok) already ran the playback
+        command, so `started` is True regardless of exit_code: the audio
+        may have already played even if the command exits non-zero. When
+        the transport fails or the response is undecodable (res.ok is
+        False), `started` is unknown (None) rather than False: the device
+        may have run the command and played audio before the response was
+        lost, so we cannot claim playback never started.
+        """
+        if not res.ok:
+            return PlayResult(
+                success=False,
+                started=None,
+                completed=False,
+                exit_code=None,
+                stdout=_safe_truncate(res.stdout),
+                stderr=_safe_truncate(res.stderr),
+                error="Failed to communicate with device shell",
+            )
+
+        success = res.exit_code == 0
+        return PlayResult(
+            success=success,
+            started=True,
+            completed=True,
+            exit_code=res.exit_code,
+            stdout=_safe_truncate(res.stdout),
+            stderr=_safe_truncate(res.stderr),
+            error=None if success else "Playback command exited with non-zero status",
+        )
 
     async def play_server_file(
         self,
@@ -235,4 +312,5 @@ class SpeakerManager:
                     data.get("exit_code", 0),
                 )
         except Exception:
-            return CommandResult("error", res, -1)
+            return CommandResult("error", res, -1, ok=False)
+        return CommandResult("", res, -1, ok=False)
