@@ -443,8 +443,8 @@ class OpenClawManager:
             )
 
             connect_params = {
-                "minProtocol": 3,
-                "maxProtocol": 3,
+                "minProtocol": 4,
+                "maxProtocol": 4,
                 "client": client_meta,
                 "locale": "zh-CN",
                 "userAgent": "open-xiaoai-bridge/1.0.0",

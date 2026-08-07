@@ -112,7 +112,7 @@ class SpeakerManager:
             return get_xiaoai().on_output_data(buffer)
 
         if blocking:
-            escaped_text = (text or "你好").replace("'", "'\\''")
+            escaped_text = str(text or "你好").replace("'", "'\\''")
             command = (
                 f"miplayer -f '{url}'"
                 if url
