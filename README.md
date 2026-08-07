@@ -315,6 +315,19 @@ curl POST /api/play/text → API Server → SpeakerManager → 小爱音箱
 
 ***
 
+## 📦 Monorepo 结构
+
+本仓库是一个 monorepo，除桥接器主服务外还包含独立子项目：
+
+| 路径 | 说明 |
+| --- | --- |
+| `/`（本目录） | Open-XiaoAI Bridge 主服务：小爱音箱与外部 AI 服务的桥接器，Python + Rust native 模块 |
+| [`mcp/`](mcp/README.md) | Open XiaoAI MCP：独立的 MCP（Model Context Protocol）服务器，把 MCP Agent 的工具调用转发到本桥接器的 HTTP API |
+
+`mcp/` 拥有自己的 `pyproject.toml`、`uv.lock` 与测试套件，与根项目的依赖和虚拟环境相互独立，可单独 `cd mcp && uv sync` 安装和运行。详见 [`mcp/README.md`](mcp/README.md)。
+
+***
+
 ## 🔌 API Server
 
 设置 `API_SERVER_ENABLE=1` 启用，默认端口 **9092**。
