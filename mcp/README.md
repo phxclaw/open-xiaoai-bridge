@@ -160,11 +160,14 @@ uv run mypy
 
 ## 健康检查
 
-使用 stdio 启动本地 MCP、完成 initialize、核对工具清单并只调用 `xiaoai_health`：
+连接已运行的 loopback Streamable HTTP MCP、完成 initialize、核对工具清单并只调用 `xiaoai_health`：
 
 ```bash
 cd /path/to/open-xiaoai-bridge/mcp && uv run python scripts/healthcheck.py
 ```
+
+健康检查默认连接 `http://127.0.0.1:8765/mcp`，不会另行启动 MCP 进程；可用 `--url`
+探测其他 loopback 实例。
 
 脚本输出单行 JSON；健康时退出码为 0，MCP、Bridge 或音箱未就绪时退出码非 0。
 健康检查不会调用 `xiaoai_send_text`、中断或任何播放工具，因此不会产生音频。

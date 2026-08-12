@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
-"""Non-playing stdio healthcheck for the Open XiaoAI MCP server."""
+"""Read-only healthcheck for the running Open XiaoAI Streamable HTTP MCP."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
-import os
-import shutil
 import sys
 from datetime import timedelta
-from pathlib import Path
 from typing import Any, TextIO
 
 import anyio
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult
 
-PROJECT_DIR = Path(__file__).resolve().parents[1]
 REQUIRED_TOOLS = {
     "xiaoai_send_text",
     "xiaoai_health",
@@ -27,10 +23,22 @@ REQUIRED_TOOLS = {
 }
 HEALTH_TOOL = "xiaoai_health"
 DEFAULT_TIMEOUT_SECONDS = 15.0
+DEFAULT_MCP_URL = "http://127.0.0.1:8765/mcp"
 
 
 class HealthcheckError(RuntimeError):
     """A concise, expected probe failure."""
+
+
+def error_message(exc: BaseException) -> str:
+    """Unwrap AnyIO exception groups so monitors see the actionable cause."""
+    children = getattr(exc, "exceptions", ())
+    if isinstance(children, tuple):
+        for child in children:
+            message = error_message(child)
+            if message:
+                return message
+    return str(exc).strip() or type(exc).__name__
 
 
 def validate_tool_names(tool_names: set[str]) -> None:
@@ -61,9 +69,17 @@ def health_payload(result: CallToolResult) -> dict[str, Any]:
         payload = decoded
 
     data = payload.get("data")
+    if payload.get("success") is not True:
+        error = payload.get("error")
+        if isinstance(error, dict):
+            code = error.get("code")
+            message = error.get("message")
+            detail = ": ".join(str(item) for item in (code, message) if item)
+            if detail:
+                raise HealthcheckError(detail)
+        raise HealthcheckError("xiaoai_health reported failure")
     if (
-        payload.get("success") is not True
-        or not isinstance(data, dict)
+        not isinstance(data, dict)
         or data.get("status") != "healthy"
         or data.get("speaker_ready") is not True
     ):
@@ -71,19 +87,13 @@ def health_payload(result: CallToolResult) -> dict[str, Any]:
     return payload
 
 
-async def probe(timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
-    """Start the local MCP, initialize it, inspect tools, and call health only."""
-    uv = shutil.which("uv")
-    if uv is None:
-        raise HealthcheckError("uv executable not found")
-    params = StdioServerParameters(
-        command=uv,
-        args=["--directory", str(PROJECT_DIR), "run", "open-xiaoai-mcp"],
-        env=dict(os.environ),
-        cwd=PROJECT_DIR,
-    )
-    with anyio.fail_after(timeout_seconds), open(os.devnull, "w", encoding="utf-8") as errlog:
-        async with stdio_client(params, errlog=errlog) as (read_stream, write_stream):
+async def probe(
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    mcp_url: str = DEFAULT_MCP_URL,
+) -> dict[str, Any]:
+    """Connect to the existing MCP, inspect tools, and call health only."""
+    with anyio.fail_after(timeout_seconds):
+        async with streamable_http_client(mcp_url) as (read_stream, write_stream, _):
             async with ClientSession(
                 read_stream,
                 write_stream,
@@ -97,6 +107,7 @@ async def probe(timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, A
                 payload = health_payload(result)
     return {
         "healthy": True,
+        "mcp_url": mcp_url,
         "tools": sorted(names),
         "bridge_status": payload["data"]["status"],
         "speaker_ready": payload["data"]["speaker_ready"],
@@ -106,6 +117,7 @@ async def probe(timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, A
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument("--url", default=DEFAULT_MCP_URL)
     return parser
 
 
@@ -116,11 +128,11 @@ def main(argv: list[str] | None = None, *, output: TextIO = sys.stdout) -> int:
         print(json.dumps({"healthy": False, "error": "timeout must be positive"}), file=output)
         return 2
     try:
-        report = asyncio.run(probe(args.timeout))
+        report = asyncio.run(probe(args.timeout, args.url))
     except BaseException as exc:
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
-        message = str(exc).strip() or type(exc).__name__
+        message = error_message(exc)
         print(json.dumps({"healthy": False, "error": message}, ensure_ascii=False), file=output)
         return 1
     print(json.dumps(report, ensure_ascii=False, sort_keys=True), file=output)
