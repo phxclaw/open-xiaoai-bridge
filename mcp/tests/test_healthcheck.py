@@ -29,26 +29,29 @@ def test_health_payload_requires_bridge_and_speaker_health() -> None:
     assert healthcheck.health_payload(result(healthy)) == healthy
 
     for unhealthy in (
-        {"success": False, "data": {"status": "healthy", "speaker_ready": True}},
         {"success": True, "data": {"status": "degraded", "speaker_ready": True}},
         {"success": True, "data": {"status": "healthy", "speaker_ready": False}},
     ):
         with pytest.raises(healthcheck.HealthcheckError, match="not healthy"):
             healthcheck.health_payload(result(unhealthy))
 
+    failure = {"success": False, "error": {"code": "bridge_unreachable", "message": "offline"}}
+    with pytest.raises(healthcheck.HealthcheckError, match="bridge_unreachable: offline"):
+        healthcheck.health_payload(result(failure))
+
 
 def test_main_emits_one_json_object_and_nonzero_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def failed_probe(timeout_seconds: float) -> dict[str, object]:
-        raise healthcheck.HealthcheckError(f"failed within {timeout_seconds}s")
+    async def failed_probe(timeout_seconds: float, mcp_url: str) -> dict[str, object]:
+        raise healthcheck.HealthcheckError(f"failed within {timeout_seconds}s at {mcp_url}")
 
     monkeypatch.setattr(healthcheck, "probe", failed_probe)
     output = StringIO()
     assert healthcheck.main(["--timeout", "3"], output=output) == 1
     assert json.loads(output.getvalue()) == {
         "healthy": False,
-        "error": "failed within 3.0s",
+        "error": f"failed within 3.0s at {healthcheck.DEFAULT_MCP_URL}",
     }
     assert output.getvalue().count("\n") == 1
 
@@ -56,3 +59,16 @@ def test_main_emits_one_json_object_and_nonzero_on_failure(
 def test_probe_can_only_call_non_playing_health_tool() -> None:
     assert healthcheck.HEALTH_TOOL == "xiaoai_health"
     assert healthcheck.HEALTH_TOOL != "xiaoai_send_text"
+
+
+def test_healthcheck_defaults_to_loopback_streamable_http() -> None:
+    assert healthcheck.DEFAULT_MCP_URL == "http://127.0.0.1:8765/mcp"
+
+
+def test_error_message_unwraps_task_group() -> None:
+    class GroupedError(Exception):
+        def __init__(self, *exceptions: BaseException) -> None:
+            self.exceptions = exceptions
+
+    grouped = GroupedError(GroupedError(healthcheck.HealthcheckError("bridge unavailable")))
+    assert healthcheck.error_message(grouped) == "bridge unavailable"
